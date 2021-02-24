@@ -39,13 +39,16 @@ int main(int argc, char *argv[]){
 
 	int err = 0;
 	for(int i=0; i<NUM_M*NUM_N; i++){
-		if((Array_C_Golden[i]-Array_C[i])!=0)
+		if((Array_C_Golden[i]-Array_C[i])!=0){
+			printf("[%d]:%d!=%d\n", i, Array_C[i], Array_C_Golden[i]);
 			err++;
+		}
 	}
 
 //    for(int i=0; i<10; i++){
 //    	printf("%d\n",rand()%100);
 //    }
+	printf("err_num = %d\n", err);
 	printf("==========END===========\n");
 	return err;
 }
