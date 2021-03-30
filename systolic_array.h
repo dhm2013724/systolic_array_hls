@@ -2,6 +2,8 @@
 #ifndef _H_SYSTOLIC_ARRAY
 #define _H_SYSTOLIC_ARRAY
 
+#include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <hls_stream.h>
 #include <assert.h>

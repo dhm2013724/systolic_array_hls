@@ -11,20 +11,20 @@
 
 class PE_cls {
 protected:
-	int C_local[2];
+	int C_local;
 	int k_cnt;
 public:
-	int pe_id;
-	void compute(hls::stream<int> &A_in, hls::stream<int> &B_in, hls::stream<int> &C_in,
+//	int trans_num;
+	void compute(hls::stream<int> &A_in, hls::stream<int> &B_in, //hls::stream<int> &C_in,
 			hls::stream<int> &A_out, hls::stream<int> &B_out, hls::stream<int> &C_out, int K, int K_MAX, bool init);
 };
 
-void PE_cls::compute(hls::stream<int> &A_in, hls::stream<int> &B_in, hls::stream<int> &C_in,
+void PE_cls::compute(hls::stream<int> &A_in, hls::stream<int> &B_in, //hls::stream<int> &C_in,
 		hls::stream<int> &A_out, hls::stream<int> &B_out, hls::stream<int> &C_out, int K, int K_MAX, bool init)
 {
 	int A_tmp, B_tmp;
 	if(init){
-		C_local[0] = 0;
+		C_local = 0;
 		k_cnt = 0;
 	}
 	for(int k=0; k<K; k++)
@@ -32,7 +32,7 @@ void PE_cls::compute(hls::stream<int> &A_in, hls::stream<int> &B_in, hls::stream
 		A_in >> A_tmp;
 		B_in >> B_tmp;
 
-		C_local[0] += A_tmp * B_tmp;
+		C_local += A_tmp * B_tmp;
 
 		A_out << A_tmp;
 		B_out << B_tmp;
@@ -40,12 +40,9 @@ void PE_cls::compute(hls::stream<int> &A_in, hls::stream<int> &B_in, hls::stream
 	}
 
 	if(k_cnt == K_MAX){
-		C_out << C_local[0];
-		for(int k=0; k<TILE_N-pe_id-1; k++)
-		{
-				C_in  >> C_local[1];
-				C_out << C_local[1];
-		}
+		C_out << C_local;
+//		for(int k=0; k<trans_num; k++)
+//			C_out.write(C_in.read());
 	}
 
 	return;
@@ -66,9 +63,11 @@ void Compute_SA(int A_local[TILE_M][TILE_K], int B_local[TILE_K][TILE_N], int C_
 	hls::stream<int> B_inter[TILE_M+1][TILE_N];
 #pragma HLS STREAM variable=B_inter
 	hls::stream<int> C_out[TILE_M][TILE_N+1];
+//	hls::stream<int> C_out[TILE_M][TILE_N];
 #pragma HLS STREAM variable=C_out
 
-	PE_cls PE_array[TILE_M][TILE_N];
+	static PE_cls PE_array[TILE_M][TILE_N];
+	static int K_cnt;
 
 	for(int i=0; i<TILE_M; i++)
 		for(int k=0; k<K_MIN; k++)
@@ -94,8 +93,8 @@ void Compute_SA(int A_local[TILE_M][TILE_K], int B_local[TILE_K][TILE_N], int C_
 		Loop_N:for(int j=0; j<TILE_N; j++)
 		{
 //			PE_array[i][j].compute(A_inter[i][j], B_inter[i][j], A_inter[i][j+1], B_inter[i+1][j], &C_local[i][j], K_MIN, K_MAX, init);//, C_out[i][j], K_MIN);
-			PE_array[i][j].pe_id = j;
-			PE_array[i][j].compute(A_inter[i][j], B_inter[i][j], C_out[i][j+1], A_inter[i][j+1], B_inter[i+1][j], C_out[i][j], K_MIN, K_MAX, init);//, C_out[i][j], K_MIN);
+//			PE_array[i][j].trans_num = TILE_N-j-1;
+			PE_array[i][j].compute(A_inter[i][j], B_inter[i][j], /*C_out[i][j+1],*/ A_inter[i][j+1], B_inter[i+1][j], C_out[i][j], K_MIN, K_MAX, init);//, C_out[i][j], K_MIN);
 		}
 
 	for(int i=0; i<TILE_M; i++)
@@ -108,17 +107,27 @@ void Compute_SA(int A_local[TILE_M][TILE_K], int B_local[TILE_K][TILE_N], int C_
 		Drain(B_inter[TILE_M][j], K_MIN);
 	}
 
-	for(int i=0; i<TILE_M; i++)
+
+	if(init){
+		K_cnt = 0;
+	}
+	K_cnt += K_MIN;
+
+	if(K_cnt == K_MAX){
+		for(int i=0; i<TILE_M; i++)
 //DO_PRAGMA(HLS LOOP_TRIPCOUNT min=1 max=TILE_M)
-		for(int j=0; j<TILE_N; j++)
-		{
+			for(int j=0; j<TILE_N; j++)
+			{
 //DO_PRAGMA(HLS LOOP_TRIPCOUNT min=1 max=TILE_N)
 #pragma HLS PIPELINE II=1
-			int tmp_out;
-			C_out[i][0] >> tmp_out;
-			if((i < M_MIN) && (j < N_MIN))
-				C_local[i][j] = tmp_out;
-		}
+				int tmp_out;
+//				C_out[i][0] >> tmp_out;
+				tmp_out = C_out[i][j].read();
+//				C_out[i][j] >> tmp_out;
+				if((i < M_MIN) && (j < N_MIN))
+					C_local[i][j] = tmp_out;
+			}
+	}
 }
 
 void Load_A(int A_local[TILE_M][TILE_K], int *A, int M_base, int K_base, int K_len, int M_MIN, int K_MIN)
