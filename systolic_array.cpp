@@ -1,6 +1,8 @@
 
 #include "systolic_array.h"
 
+#include "systolic_array.h"
+
 //////////////////////////////////////////v10 start////////////////////////////////////////
 #define MAX(x,y) ((x)>(y)?(x):(y))
 #define MIN(x,y) ((x)<(y)?(x):(y))
@@ -14,12 +16,10 @@ protected:
 	int C_local;
 	int k_cnt;
 public:
-	void compute(hls::stream<int> &A_in, hls::stream<int> &B_in,
-			hls::stream<int> &A_out, hls::stream<int> &B_out, hls::stream<int> &C_out, int K, int K_MAX, bool init);
+	void compute(hls::stream<int> &A_in, hls::stream<int> &B_in, hls::stream<int> &A_out, hls::stream<int> &B_out, hls::stream<int> &C_out, int K, int K_MAX, bool init);
 };
 
-void PE_cls::compute(hls::stream<int> &A_in, hls::stream<int> &B_in,
-		hls::stream<int> &A_out, hls::stream<int> &B_out, hls::stream<int> &C_out, int K, int K_MAX, bool init)
+void PE_cls::compute(hls::stream<int> &A_in, hls::stream<int> &B_in, hls::stream<int> &A_out, hls::stream<int> &B_out, hls::stream<int> &C_out, int K, int K_MAX, bool init)
 {
 	int A_tmp, B_tmp;
 	if(init){
@@ -35,14 +35,54 @@ DO_PRAGMA(HLS LOOP_TRIPCOUNT min=1 max=TILE_K)
 		B_in >> B_tmp;
 
 		C_local += A_tmp * B_tmp;
-
 		A_out << A_tmp;
 		B_out << B_tmp;
 		k_cnt++;
 	}
 
 	if(k_cnt == K_MAX){
-		C_out << C_local;
+		C_out.write(C_local);
+	}
+
+	return;
+}
+
+template<int MIN_R,int MID_C>
+void compute_pe(hls::stream<int> &A_in, hls::stream<int> &B_in, hls::stream<int> &A_out, hls::stream<int> &B_out, hls::stream<int> &C_out, int K, int K_MAX, bool init,
+		int *C_local_array, int *k_cnt_array)
+{
+#pragma HLS INLINE off
+	int C_local;
+	int k_cnt;
+
+	int A_tmp, B_tmp;
+	if(init){
+		C_local = 0;
+		k_cnt = 0;
+	}else
+	{
+		C_local = *C_local_array;
+		k_cnt = *k_cnt_array;
+	}
+
+	for(int k=0; k<K; k++)
+	{
+DO_PRAGMA(HLS LOOP_TRIPCOUNT min=1 max=TILE_K)
+#pragma HLS PIPELINE II=1
+		A_in >> A_tmp;
+		B_in >> B_tmp;
+
+		C_local += A_tmp * B_tmp;
+		A_out << A_tmp;
+		B_out << B_tmp;
+		k_cnt++;
+	}
+
+	if(k_cnt == K_MAX){
+		C_out.write(C_local);
+	}else{
+		*C_local_array = C_local;
+		*k_cnt_array = k_cnt;
 	}
 
 	return;
@@ -59,7 +99,7 @@ DO_PRAGMA(HLS LOOP_TRIPCOUNT min=1 max=TILE_K)
 }
 
 void Load_wrapper(int A_local[TILE_M][TILE_K], int B_local[TILE_K][TILE_N],
-		hls::stream<int> A_inter[TILE_M][TILE_N+1], hls::stream<int> B_inter[TILE_M+1][TILE_N],
+		hls::stream<int> Ain_s[TILE_M], hls::stream<int> Bin_s[TILE_N],
 		int *K_cnt0, bool *init0, bool init, int M_MIN, int N_MIN, int K_MIN){
 
 	static int K_cnt;
@@ -75,18 +115,14 @@ void Load_wrapper(int A_local[TILE_M][TILE_K], int B_local[TILE_K][TILE_N],
 			int tmp = 0;
 			if(i<M_MIN)
 				tmp = A_local[i][k];
-			A_inter[i][0] << tmp;
+			Ain_s[i] << tmp;
 		}
-	}
 
-	for(int k=0; k<K_MIN; k++)
-	{
-#pragma HLS PIPELINE II=1
 		for(int j=0; j<TILE_N; j++){
 			int tmp = 0;
 			if(j<N_MIN)
 				tmp = B_local[k][j];
-			B_inter[0][j] << tmp;
+			Bin_s[j] << tmp;
 		}
 	}
 
@@ -94,19 +130,148 @@ void Load_wrapper(int A_local[TILE_M][TILE_K], int B_local[TILE_K][TILE_N],
 	*init0 = init;
 }
 
-void Compute_wrapper(hls::stream<int> A_inter[TILE_M][TILE_N+1], hls::stream<int> B_inter[TILE_M+1][TILE_N],
-		hls::stream<int> C_out[TILE_M][TILE_N+1], bool init, int K_MIN, int K_MAX, int K_cnt, int *K_cnt1){
+void Compute_wrapper(hls::stream<int> Ain_s[TILE_M], hls::stream<int> Bin_s[TILE_N],
+		hls::stream<int> Cout_s[TILE_M], bool init, int K_MIN, int K_MAX, int K_cnt, int *K_cnt1){
+
+	hls::stream<int> A_inter[TILE_M][TILE_N+1];
+#pragma HLS STREAM variable=A_inter dim=1 depth=5
+#pragma HLS STREAM variable=A_inter dim=2 depth=5
+//DO_PRAGMA(#pragma HLS STREAM variable=A_inter dim=1 depth=TILE_K)
+//DO_PRAGMA(#pragma HLS STREAM variable=A_inter dim=2 depth=TILE_K)
+	hls::stream<int> B_inter[TILE_M+1][TILE_N];
+#pragma HLS STREAM variable=B_inter dim=1 depth=5
+#pragma HLS STREAM variable=B_inter dim=2 depth=5
+//DO_PRAGMA(#pragma HLS STREAM variable=B_inter dim=1 depth=TILE_K)
+//DO_PRAGMA(#pragma HLS STREAM variable=B_inter dim=2 depth=TILE_K)
+hls::stream<int> C_out[TILE_M][TILE_N+1];
+#pragma HLS STREAM variable=C_out dim=1 depth=9
+#pragma HLS STREAM variable=C_out dim=2 depth=9
+//DO_PRAGMA(#pragma HLS STREAM variable=C_out dim=1 depth=TILE_N)
+//DO_PRAGMA(#pragma HLS STREAM variable=C_out dim=2 depth=TILE_N)
+
 
 	static PE_cls PE_array[TILE_M][TILE_N];
+#pragma HLS ARRAY_PARTITION variable=PE_array complete dim=1
+#pragma HLS ARRAY_PARTITION variable=PE_array complete dim=2
+//#pragma HLS allocation instances=PE_cls::compute limit=200 function
 
-	Loop_M:for(int i=0; i<TILE_M; i++){
-#pragma HLS UNROLL
-		Loop_N:for(int j=0; j<TILE_N; j++)
-		{
-#pragma HLS UNROLL
-			PE_array[i][j].compute(A_inter[i][j], B_inter[i][j], A_inter[i][j+1], B_inter[i+1][j], C_out[i][j], K_MIN, K_MAX, init);
+	static int C_local_array[TILE_M][TILE_N];
+#pragma HLS ARRAY_PARTITION variable=C_local_array complete dim=0
+	static int k_cnt_array[TILE_M][TILE_N];
+#pragma HLS ARRAY_PARTITION variable=k_cnt_array complete dim=0
+
+	for(int k=0; k<K_MIN; k++)
+	{
+DO_PRAGMA(HLS LOOP_TRIPCOUNT min=1 max=TILE_K)
+#pragma HLS PIPELINE II=1
+		for(int i=0; i<TILE_M; i++){
+			int tmp = Ain_s[i].read();
+			A_inter[i][0].write(tmp);
+		}
+
+		for(int j=0; j<TILE_N; j++){
+			int tmp = Bin_s[j].read();
+			B_inter[0][j].write(tmp);
 		}
 	}
+
+	{
+		int i;
+		i = 0;
+		compute_pe<0, 0>(A_inter[i][0], B_inter[i][0], A_inter[i][1], B_inter[i+1][0], C_out[i][0], K_MIN, K_MAX, init, &C_local_array[i][0], &k_cnt_array[i][0]);
+		compute_pe<0, 1>(A_inter[i][1], B_inter[i][1], A_inter[i][2], B_inter[i+1][1], C_out[i][1], K_MIN, K_MAX, init, &C_local_array[i][1], &k_cnt_array[i][1]);
+		compute_pe<0, 2>(A_inter[i][2], B_inter[i][2], A_inter[i][3], B_inter[i+1][2], C_out[i][2], K_MIN, K_MAX, init, &C_local_array[i][2], &k_cnt_array[i][2]);
+		compute_pe<0, 3>(A_inter[i][3], B_inter[i][3], A_inter[i][4], B_inter[i+1][3], C_out[i][3], K_MIN, K_MAX, init, &C_local_array[i][3], &k_cnt_array[i][3]);
+		compute_pe<0, 4>(A_inter[i][4], B_inter[i][4], A_inter[i][5], B_inter[i+1][4], C_out[i][4], K_MIN, K_MAX, init, &C_local_array[i][4], &k_cnt_array[i][4]);
+		compute_pe<0, 5>(A_inter[i][5], B_inter[i][5], A_inter[i][6], B_inter[i+1][5], C_out[i][5], K_MIN, K_MAX, init, &C_local_array[i][5], &k_cnt_array[i][5]);
+		compute_pe<0, 6>(A_inter[i][6], B_inter[i][6], A_inter[i][7], B_inter[i+1][6], C_out[i][6], K_MIN, K_MAX, init, &C_local_array[i][6], &k_cnt_array[i][6]);
+		compute_pe<0, 7>(A_inter[i][7], B_inter[i][7], A_inter[i][8], B_inter[i+1][7], C_out[i][7], K_MIN, K_MAX, init, &C_local_array[i][7], &k_cnt_array[i][7]);
+		compute_pe<0, 8>(A_inter[i][8], B_inter[i][8], A_inter[i][9], B_inter[i+1][8], C_out[i][8], K_MIN, K_MAX, init, &C_local_array[i][8], &k_cnt_array[i][8]);
+		i = 1;
+		compute_pe<1, 0>(A_inter[i][0], B_inter[i][0], A_inter[i][1], B_inter[i+1][0], C_out[i][0], K_MIN, K_MAX, init, &C_local_array[i][0], &k_cnt_array[i][0]);
+		compute_pe<1, 1>(A_inter[i][1], B_inter[i][1], A_inter[i][2], B_inter[i+1][1], C_out[i][1], K_MIN, K_MAX, init, &C_local_array[i][1], &k_cnt_array[i][1]);
+		compute_pe<1, 2>(A_inter[i][2], B_inter[i][2], A_inter[i][3], B_inter[i+1][2], C_out[i][2], K_MIN, K_MAX, init, &C_local_array[i][2], &k_cnt_array[i][2]);
+		compute_pe<1, 3>(A_inter[i][3], B_inter[i][3], A_inter[i][4], B_inter[i+1][3], C_out[i][3], K_MIN, K_MAX, init, &C_local_array[i][3], &k_cnt_array[i][3]);
+		compute_pe<1, 4>(A_inter[i][4], B_inter[i][4], A_inter[i][5], B_inter[i+1][4], C_out[i][4], K_MIN, K_MAX, init, &C_local_array[i][4], &k_cnt_array[i][4]);
+		compute_pe<1, 5>(A_inter[i][5], B_inter[i][5], A_inter[i][6], B_inter[i+1][5], C_out[i][5], K_MIN, K_MAX, init, &C_local_array[i][5], &k_cnt_array[i][5]);
+		compute_pe<1, 6>(A_inter[i][6], B_inter[i][6], A_inter[i][7], B_inter[i+1][6], C_out[i][6], K_MIN, K_MAX, init, &C_local_array[i][6], &k_cnt_array[i][6]);
+		compute_pe<1, 7>(A_inter[i][7], B_inter[i][7], A_inter[i][8], B_inter[i+1][7], C_out[i][7], K_MIN, K_MAX, init, &C_local_array[i][7], &k_cnt_array[i][7]);
+		compute_pe<1, 8>(A_inter[i][8], B_inter[i][8], A_inter[i][9], B_inter[i+1][8], C_out[i][8], K_MIN, K_MAX, init, &C_local_array[i][8], &k_cnt_array[i][8]);
+		i = 2;
+		compute_pe<2, 0>(A_inter[i][0], B_inter[i][0], A_inter[i][1], B_inter[i+1][0], C_out[i][0], K_MIN, K_MAX, init, &C_local_array[i][0], &k_cnt_array[i][0]);
+		compute_pe<2, 1>(A_inter[i][1], B_inter[i][1], A_inter[i][2], B_inter[i+1][1], C_out[i][1], K_MIN, K_MAX, init, &C_local_array[i][1], &k_cnt_array[i][1]);
+		compute_pe<2, 2>(A_inter[i][2], B_inter[i][2], A_inter[i][3], B_inter[i+1][2], C_out[i][2], K_MIN, K_MAX, init, &C_local_array[i][2], &k_cnt_array[i][2]);
+		compute_pe<2, 3>(A_inter[i][3], B_inter[i][3], A_inter[i][4], B_inter[i+1][3], C_out[i][3], K_MIN, K_MAX, init, &C_local_array[i][3], &k_cnt_array[i][3]);
+		compute_pe<2, 4>(A_inter[i][4], B_inter[i][4], A_inter[i][5], B_inter[i+1][4], C_out[i][4], K_MIN, K_MAX, init, &C_local_array[i][4], &k_cnt_array[i][4]);
+		compute_pe<2, 5>(A_inter[i][5], B_inter[i][5], A_inter[i][6], B_inter[i+1][5], C_out[i][5], K_MIN, K_MAX, init, &C_local_array[i][5], &k_cnt_array[i][5]);
+		compute_pe<2, 6>(A_inter[i][6], B_inter[i][6], A_inter[i][7], B_inter[i+1][6], C_out[i][6], K_MIN, K_MAX, init, &C_local_array[i][6], &k_cnt_array[i][6]);
+		compute_pe<2, 7>(A_inter[i][7], B_inter[i][7], A_inter[i][8], B_inter[i+1][7], C_out[i][7], K_MIN, K_MAX, init, &C_local_array[i][7], &k_cnt_array[i][7]);
+		compute_pe<2, 8>(A_inter[i][8], B_inter[i][8], A_inter[i][9], B_inter[i+1][8], C_out[i][8], K_MIN, K_MAX, init, &C_local_array[i][8], &k_cnt_array[i][8]);
+		i = 3;
+		compute_pe<3, 0>(A_inter[i][0], B_inter[i][0], A_inter[i][1], B_inter[i+1][0], C_out[i][0], K_MIN, K_MAX, init, &C_local_array[i][0], &k_cnt_array[i][0]);
+		compute_pe<3, 1>(A_inter[i][1], B_inter[i][1], A_inter[i][2], B_inter[i+1][1], C_out[i][1], K_MIN, K_MAX, init, &C_local_array[i][1], &k_cnt_array[i][1]);
+		compute_pe<3, 2>(A_inter[i][2], B_inter[i][2], A_inter[i][3], B_inter[i+1][2], C_out[i][2], K_MIN, K_MAX, init, &C_local_array[i][2], &k_cnt_array[i][2]);
+		compute_pe<3, 3>(A_inter[i][3], B_inter[i][3], A_inter[i][4], B_inter[i+1][3], C_out[i][3], K_MIN, K_MAX, init, &C_local_array[i][3], &k_cnt_array[i][3]);
+		compute_pe<3, 4>(A_inter[i][4], B_inter[i][4], A_inter[i][5], B_inter[i+1][4], C_out[i][4], K_MIN, K_MAX, init, &C_local_array[i][4], &k_cnt_array[i][4]);
+		compute_pe<3, 5>(A_inter[i][5], B_inter[i][5], A_inter[i][6], B_inter[i+1][5], C_out[i][5], K_MIN, K_MAX, init, &C_local_array[i][5], &k_cnt_array[i][5]);
+		compute_pe<3, 6>(A_inter[i][6], B_inter[i][6], A_inter[i][7], B_inter[i+1][6], C_out[i][6], K_MIN, K_MAX, init, &C_local_array[i][6], &k_cnt_array[i][6]);
+		compute_pe<3, 7>(A_inter[i][7], B_inter[i][7], A_inter[i][8], B_inter[i+1][7], C_out[i][7], K_MIN, K_MAX, init, &C_local_array[i][7], &k_cnt_array[i][7]);
+		compute_pe<3, 8>(A_inter[i][8], B_inter[i][8], A_inter[i][9], B_inter[i+1][8], C_out[i][8], K_MIN, K_MAX, init, &C_local_array[i][8], &k_cnt_array[i][8]);
+		i = 4;
+		compute_pe<4, 0>(A_inter[i][0], B_inter[i][0], A_inter[i][1], B_inter[i+1][0], C_out[i][0], K_MIN, K_MAX, init, &C_local_array[i][0], &k_cnt_array[i][0]);
+		compute_pe<4, 1>(A_inter[i][1], B_inter[i][1], A_inter[i][2], B_inter[i+1][1], C_out[i][1], K_MIN, K_MAX, init, &C_local_array[i][1], &k_cnt_array[i][1]);
+		compute_pe<4, 2>(A_inter[i][2], B_inter[i][2], A_inter[i][3], B_inter[i+1][2], C_out[i][2], K_MIN, K_MAX, init, &C_local_array[i][2], &k_cnt_array[i][2]);
+		compute_pe<4, 3>(A_inter[i][3], B_inter[i][3], A_inter[i][4], B_inter[i+1][3], C_out[i][3], K_MIN, K_MAX, init, &C_local_array[i][3], &k_cnt_array[i][3]);
+		compute_pe<4, 4>(A_inter[i][4], B_inter[i][4], A_inter[i][5], B_inter[i+1][4], C_out[i][4], K_MIN, K_MAX, init, &C_local_array[i][4], &k_cnt_array[i][4]);
+		compute_pe<4, 5>(A_inter[i][5], B_inter[i][5], A_inter[i][6], B_inter[i+1][5], C_out[i][5], K_MIN, K_MAX, init, &C_local_array[i][5], &k_cnt_array[i][5]);
+		compute_pe<4, 6>(A_inter[i][6], B_inter[i][6], A_inter[i][7], B_inter[i+1][6], C_out[i][6], K_MIN, K_MAX, init, &C_local_array[i][6], &k_cnt_array[i][6]);
+		compute_pe<4, 7>(A_inter[i][7], B_inter[i][7], A_inter[i][8], B_inter[i+1][7], C_out[i][7], K_MIN, K_MAX, init, &C_local_array[i][7], &k_cnt_array[i][7]);
+		compute_pe<4, 8>(A_inter[i][8], B_inter[i][8], A_inter[i][9], B_inter[i+1][8], C_out[i][8], K_MIN, K_MAX, init, &C_local_array[i][8], &k_cnt_array[i][8]);
+		i = 5;
+		compute_pe<5, 0>(A_inter[i][0], B_inter[i][0], A_inter[i][1], B_inter[i+1][0], C_out[i][0], K_MIN, K_MAX, init, &C_local_array[i][0], &k_cnt_array[i][0]);
+		compute_pe<5, 1>(A_inter[i][1], B_inter[i][1], A_inter[i][2], B_inter[i+1][1], C_out[i][1], K_MIN, K_MAX, init, &C_local_array[i][1], &k_cnt_array[i][1]);
+		compute_pe<5, 2>(A_inter[i][2], B_inter[i][2], A_inter[i][3], B_inter[i+1][2], C_out[i][2], K_MIN, K_MAX, init, &C_local_array[i][2], &k_cnt_array[i][2]);
+		compute_pe<5, 3>(A_inter[i][3], B_inter[i][3], A_inter[i][4], B_inter[i+1][3], C_out[i][3], K_MIN, K_MAX, init, &C_local_array[i][3], &k_cnt_array[i][3]);
+		compute_pe<5, 4>(A_inter[i][4], B_inter[i][4], A_inter[i][5], B_inter[i+1][4], C_out[i][4], K_MIN, K_MAX, init, &C_local_array[i][4], &k_cnt_array[i][4]);
+		compute_pe<5, 5>(A_inter[i][5], B_inter[i][5], A_inter[i][6], B_inter[i+1][5], C_out[i][5], K_MIN, K_MAX, init, &C_local_array[i][5], &k_cnt_array[i][5]);
+		compute_pe<5, 6>(A_inter[i][6], B_inter[i][6], A_inter[i][7], B_inter[i+1][6], C_out[i][6], K_MIN, K_MAX, init, &C_local_array[i][6], &k_cnt_array[i][6]);
+		compute_pe<5, 7>(A_inter[i][7], B_inter[i][7], A_inter[i][8], B_inter[i+1][7], C_out[i][7], K_MIN, K_MAX, init, &C_local_array[i][7], &k_cnt_array[i][7]);
+		compute_pe<5, 8>(A_inter[i][8], B_inter[i][8], A_inter[i][9], B_inter[i+1][8], C_out[i][8], K_MIN, K_MAX, init, &C_local_array[i][8], &k_cnt_array[i][8]);
+		i = 6;
+		compute_pe<6, 0>(A_inter[i][0], B_inter[i][0], A_inter[i][1], B_inter[i+1][0], C_out[i][0], K_MIN, K_MAX, init, &C_local_array[i][0], &k_cnt_array[i][0]);
+		compute_pe<6, 1>(A_inter[i][1], B_inter[i][1], A_inter[i][2], B_inter[i+1][1], C_out[i][1], K_MIN, K_MAX, init, &C_local_array[i][1], &k_cnt_array[i][1]);
+		compute_pe<6, 2>(A_inter[i][2], B_inter[i][2], A_inter[i][3], B_inter[i+1][2], C_out[i][2], K_MIN, K_MAX, init, &C_local_array[i][2], &k_cnt_array[i][2]);
+		compute_pe<6, 3>(A_inter[i][3], B_inter[i][3], A_inter[i][4], B_inter[i+1][3], C_out[i][3], K_MIN, K_MAX, init, &C_local_array[i][3], &k_cnt_array[i][3]);
+		compute_pe<6, 4>(A_inter[i][4], B_inter[i][4], A_inter[i][5], B_inter[i+1][4], C_out[i][4], K_MIN, K_MAX, init, &C_local_array[i][4], &k_cnt_array[i][4]);
+		compute_pe<6, 5>(A_inter[i][5], B_inter[i][5], A_inter[i][6], B_inter[i+1][5], C_out[i][5], K_MIN, K_MAX, init, &C_local_array[i][5], &k_cnt_array[i][5]);
+		compute_pe<6, 6>(A_inter[i][6], B_inter[i][6], A_inter[i][7], B_inter[i+1][6], C_out[i][6], K_MIN, K_MAX, init, &C_local_array[i][6], &k_cnt_array[i][6]);
+		compute_pe<6, 7>(A_inter[i][7], B_inter[i][7], A_inter[i][8], B_inter[i+1][7], C_out[i][7], K_MIN, K_MAX, init, &C_local_array[i][7], &k_cnt_array[i][7]);
+		compute_pe<6, 8>(A_inter[i][8], B_inter[i][8], A_inter[i][9], B_inter[i+1][8], C_out[i][8], K_MIN, K_MAX, init, &C_local_array[i][8], &k_cnt_array[i][8]);
+	}
+
+//	Loop_M:for(int i=0; i<TILE_M; i++)
+//	{
+//#pragma HLS UNROLL
+//		compute_pe<0, 0>(A_inter[i][0], B_inter[i][0], A_inter[i][1], B_inter[i+1][0], C_out[i][0], K_MIN, K_MAX, init, &C_local_array[i][0], &k_cnt_array[i][0]);
+//		compute_pe<0, 1>(A_inter[i][1], B_inter[i][1], A_inter[i][2], B_inter[i+1][1], C_out[i][1], K_MIN, K_MAX, init, &C_local_array[i][1], &k_cnt_array[i][1]);
+//		compute_pe<0, 2>(A_inter[i][2], B_inter[i][2], A_inter[i][3], B_inter[i+1][2], C_out[i][2], K_MIN, K_MAX, init, &C_local_array[i][2], &k_cnt_array[i][2]);
+//		compute_pe<0, 3>(A_inter[i][3], B_inter[i][3], A_inter[i][4], B_inter[i+1][3], C_out[i][3], K_MIN, K_MAX, init, &C_local_array[i][3], &k_cnt_array[i][3]);
+//		compute_pe<0, 4>(A_inter[i][4], B_inter[i][4], A_inter[i][5], B_inter[i+1][4], C_out[i][4], K_MIN, K_MAX, init, &C_local_array[i][4], &k_cnt_array[i][4]);
+//		compute_pe<0, 5>(A_inter[i][5], B_inter[i][5], A_inter[i][6], B_inter[i+1][5], C_out[i][5], K_MIN, K_MAX, init, &C_local_array[i][5], &k_cnt_array[i][5]);
+//		compute_pe<0, 6>(A_inter[i][6], B_inter[i][6], A_inter[i][7], B_inter[i+1][6], C_out[i][6], K_MIN, K_MAX, init, &C_local_array[i][6], &k_cnt_array[i][6]);
+//		compute_pe<0, 7>(A_inter[i][7], B_inter[i][7], A_inter[i][8], B_inter[i+1][7], C_out[i][7], K_MIN, K_MAX, init, &C_local_array[i][7], &k_cnt_array[i][7]);
+//		compute_pe<0, 8>(A_inter[i][8], B_inter[i][8], A_inter[i][9], B_inter[i+1][8], C_out[i][8], K_MIN, K_MAX, init, &C_local_array[i][8], &k_cnt_array[i][8]);
+//	}
+
+//	Loop_M:for(int i=0; i<TILE_M; i++)
+//	{
+//#pragma HLS UNROLL
+//		Loop_N:for(int j=0; j<TILE_N; j++)
+//		{
+//#pragma HLS UNROLL
+//			PE_array[i][j].compute(A_inter[i][j], B_inter[i][j], A_inter[i][j+1], B_inter[i+1][j], C_out[i][j], K_MIN, K_MAX, init);
+//		}
+//	}
 
 	for(int i=0; i<TILE_M; i++)
 	{
@@ -121,20 +286,8 @@ void Compute_wrapper(hls::stream<int> A_inter[TILE_M][TILE_N+1], hls::stream<int
 	}
 
 	if(K_cnt == K_MAX){
-////tranfer neighbor PE's output
-//		for(int j=TILE_N-1; j>=0; j--)
-//			for(int k=0; k<TILE_N-1-j; k++){
-//#pragma HLS PIPELINE II=1
-//				for(int i=0; i<TILE_M; i++){
-//					int tmp_in, tmp_out;
-//					C_out[i][j+1] >> tmp_in;
-//					tmp_out = tmp_in;
-//					C_out[i][j]   << tmp_out;
-//				}
-//			}
-
 //tranfer neighbor PE's output
-		for(int j=TILE_N-1; j>=0; j--)
+		for(int j=TILE_N-1; j>=0; j--){
 			for(int k=0; k<TILE_N-1-j; k++){
 #pragma HLS PIPELINE II=1
 				for(int i=0; i<TILE_M; i++){
@@ -144,12 +297,25 @@ void Compute_wrapper(hls::stream<int> A_inter[TILE_M][TILE_N+1], hls::stream<int
 					C_out[i][j]   << tmp_out;
 				}
 			}
+		}
+
+		for(int i=0; i<TILE_M; i++)
+		{
+#pragma HLS UNROLL
+			for(int j=0; j<TILE_N; j++){
+#pragma HLS PIPELINE II=1
+				int tmp_in, tmp_out;
+				C_out[i][0] >> tmp_in;
+				tmp_out = tmp_in;
+				Cout_s[i] << tmp_out;
+			}
+		}
 	}
 
 	*K_cnt1 = K_cnt;
 }
 
-void Write_wrapper(int C_local[TILE_M][TILE_N], hls::stream<int> C_out[TILE_M][TILE_N+1],
+void Write_wrapper(int C_local[TILE_M][TILE_N], hls::stream<int> Cout_s[TILE_M],
 		int M_MIN, int N_MIN, int K_MIN, int K_cnt, int K_MAX){
 	if(K_cnt == K_MAX){
 		for(int j=0; j<TILE_N; j++){
@@ -157,7 +323,7 @@ void Write_wrapper(int C_local[TILE_M][TILE_N], hls::stream<int> C_out[TILE_M][T
 			for(int i=0; i<TILE_M; i++)
 			{
 				int tmp_out;
-				C_out[i][0] >> tmp_out;
+				Cout_s[i] >> tmp_out;
 				if((i < M_MIN) && (j < N_MIN))
 					C_local[i][j] = tmp_out;
 			}
@@ -167,23 +333,25 @@ void Write_wrapper(int C_local[TILE_M][TILE_N], hls::stream<int> C_out[TILE_M][T
 
 void Compute_SA(int A_local[TILE_M][TILE_K], int B_local[TILE_K][TILE_N], int C_local[TILE_M][TILE_N], bool init, int M_MIN, int N_MIN, int K_MIN, int K_MAX)
 {
-	hls::stream<int> A_inter[TILE_M][TILE_N+1];
-DO_PRAGMA(#pragma HLS STREAM variable=A_inter depth=TILE_K)
-	hls::stream<int> B_inter[TILE_M+1][TILE_N];
-DO_PRAGMA(#pragma HLS STREAM variable=B_inter depth=TILE_K)
-	hls::stream<int> C_out[TILE_M][TILE_N+1];
-#pragma HLS STREAM variable=C_out
 
 #pragma HLS DATAFLOW
+
+	hls::stream<int> Ain_s[TILE_M];
+DO_PRAGMA(#pragma HLS STREAM variable=Ain_s depth=TILE_K)
+	hls::stream<int> Bin_s[TILE_N];
+DO_PRAGMA(#pragma HLS STREAM variable=Bin_s depth=TILE_K)
+hls::stream<int> Cout_s[TILE_M];
+#pragma HLS ARRAY_PARTITION variable=Cout_s complete dim=1
+DO_PRAGMA(#pragma HLS STREAM variable=Cout_s depth=TILE_N)
 
 	int K_cnt0[1], K_cnt1[1];
 	bool init0[1];
 
-	Load_wrapper( A_local, B_local, A_inter, B_inter, K_cnt0, init0, init, M_MIN, N_MIN, K_MIN);
+	Load_wrapper( A_local, B_local, Ain_s, Bin_s, K_cnt0, init0, init, M_MIN, N_MIN, K_MIN);
 
-	Compute_wrapper( A_inter, B_inter, C_out, init0[0], K_MIN, K_MAX, K_cnt0[0], K_cnt1);
+	Compute_wrapper( Ain_s, Bin_s, Cout_s, init0[0], K_MIN, K_MAX, K_cnt0[0], K_cnt1);
 
-	Write_wrapper( C_local, C_out, M_MIN, N_MIN, K_MIN, K_cnt1[0], K_MAX);
+	Write_wrapper( C_local, Cout_s, M_MIN, N_MIN, K_MIN, K_cnt1[0], K_MAX);
 
 }
 
