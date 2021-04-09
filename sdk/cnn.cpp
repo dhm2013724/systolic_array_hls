@@ -118,6 +118,7 @@ int copy_mem2file(char *bin_file,uint32_t byte_num,unsigned long in_buffer)
 
 int MUL(int *A, int *B, int *C, int M, int N, int K)//A[MxK]*B[KxN]=C[MxN]
 {
+	int kloops = ceil(K*1.0/TILE_K);
 
 	copy_mem2dev((uint8_t *)A, M*K*4, AIN_BASEADDR);
 	copy_mem2dev((uint8_t *)B, K*N*4, BIN_BASEADDR);
@@ -150,6 +151,7 @@ int MUL(int *A, int *B, int *C, int M, int N, int K)//A[MxK]*B[KxN]=C[MxN]
 	WriteReg(xbase_address, XMUL_CB_ADDR_M_DATA,  M);
 	WriteReg(xbase_address, XMUL_CB_ADDR_N_DATA,  N);
 	WriteReg(xbase_address, XMUL_CB_ADDR_K_DATA,  K);
+	WriteReg(xbase_address, XMUL_CB_ADDR_KLOOPS_DATA,  kloops);
 
 	WriteReg(xbase_address, XMUL_CB_ADDR_GIE, 0x0);
 	WriteReg(xbase_address, XMUL_CB_ADDR_AP_CTRL, 0x1);//Start

@@ -41,20 +41,21 @@
 // 0x3c : reserved
 // (SC = Self Clear, COR = Clear on Read, TOW = Toggle on Write, COH = Clear on Handshake)
 
-#define XMUL_CB_ADDR_AP_CTRL 0x00
-#define XMUL_CB_ADDR_GIE     0x04
-#define XMUL_CB_ADDR_IER     0x08
-#define XMUL_CB_ADDR_ISR     0x0c
-#define XMUL_CB_ADDR_A_DATA  0x10
-#define XMUL_CB_BITS_A_DATA  32
-#define XMUL_CB_ADDR_B_DATA  0x18
-#define XMUL_CB_BITS_B_DATA  32
-#define XMUL_CB_ADDR_C_DATA  0x20
-#define XMUL_CB_BITS_C_DATA  32
-#define XMUL_CB_ADDR_M_DATA  0x28
-#define XMUL_CB_BITS_M_DATA  32
-#define XMUL_CB_ADDR_N_DATA  0x30
-#define XMUL_CB_BITS_N_DATA  32
-#define XMUL_CB_ADDR_K_DATA  0x38
-#define XMUL_CB_BITS_K_DATA  32
-
+#define XMUL_CB_ADDR_AP_CTRL     0x00
+#define XMUL_CB_ADDR_GIE         0x04
+#define XMUL_CB_ADDR_IER         0x08
+#define XMUL_CB_ADDR_ISR         0x0c
+#define XMUL_CB_ADDR_A_DATA      0x10
+#define XMUL_CB_BITS_A_DATA      32
+#define XMUL_CB_ADDR_B_DATA      0x18
+#define XMUL_CB_BITS_B_DATA      32
+#define XMUL_CB_ADDR_C_DATA      0x20
+#define XMUL_CB_BITS_C_DATA      32
+#define XMUL_CB_ADDR_M_DATA      0x28
+#define XMUL_CB_BITS_M_DATA      32
+#define XMUL_CB_ADDR_N_DATA      0x30
+#define XMUL_CB_BITS_N_DATA      32
+#define XMUL_CB_ADDR_K_DATA      0x38
+#define XMUL_CB_BITS_K_DATA      32
+#define XMUL_CB_ADDR_KLOOPS_DATA 0x40
+#define XMUL_CB_BITS_KLOOPS_DATA 32

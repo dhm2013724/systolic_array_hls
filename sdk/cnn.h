@@ -17,9 +17,7 @@
 
 double what_time_is_it_now();
 
-#define NUM_M 32
-#define NUM_N 64
-#define NUM_K 12
+#define TILE_K 5
 
 #define ACC_BASEADDR     0x00A0000000
 
