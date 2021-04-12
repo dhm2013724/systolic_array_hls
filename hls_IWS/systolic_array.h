@@ -19,10 +19,10 @@
 const int DEPTH_TILE_M = TILE_M;
 const int DEPTH_SA_R = SA_R;
 const int DEPTH_SA_C = SA_C;
-//const int DEPTH_COUT_S = SA_R*TILE_M;
-//const int PE_TRANS_NUM_MAX =  SA_R*TILE_M;
-const int DEPTH_COUT_S = 49;
-const int PE_TRANS_NUM_MAX =  49;
+const int DEPTH_COUT_S = SA_R*TILE_M;
+const int PE_TRANS_NUM_MAX =  SA_R*TILE_M;
+//const int DEPTH_COUT_S = 49;
+//const int PE_TRANS_NUM_MAX =  49;
 
 
 #define NUM_M 32
