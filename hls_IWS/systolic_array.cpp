@@ -431,7 +431,7 @@
 ////////////////////////////////////////////v12-iws_c syn ok end////////////////////////////////////////
 
 
-//////////////////////////////////////////v12-iws_c syn ok  start////////////////////////////////////////
+//////////////////////////////////////////v13-iws_c syn ok  start////////////////////////////////////////
 typedef struct {
 	bool wb;
 	bool init;
@@ -443,18 +443,24 @@ protected:
 	int tmp_buf[TILE_M];
 public:
 template<int MIN_R,int MID_C>
-	void compute(hls::stream<int> &A_in, hls::stream<int> &C_in, hls::stream<int> &A_out, hls::stream<int> &C_out, int M_MIN);
+	void compute(hls::stream<int> &A_in, hls::stream<int> &M_MIN_s_in, hls::stream<int> &C_in,
+			hls::stream<int> &A_out, hls::stream<int> &M_MIN_s_out, hls::stream<int> &C_out);
 template<int MIN_R,int MID_C>
 	void fillB(hls::stream<int> &B_in, hls::stream<int> &B_out);
 };
 
 template<int MIN_R,int MID_C>
-void PE_cls::compute(hls::stream<int> &A_in, hls::stream<int> &C_in, hls::stream<int> &A_out, hls::stream<int> &C_out, int M_MIN)
+void PE_cls::compute(hls::stream<int> &A_in, hls::stream<int> &M_MIN_s_in, hls::stream<int> &C_in,
+		hls::stream<int> &A_out, hls::stream<int> &M_MIN_s_out, hls::stream<int> &C_out)
 {
 	const int DEPTH_COUT_S_single = (MIN_R+1)*TILE_M;
 #pragma HLS STREAM variable=C_out depth=DEPTH_COUT_S_single
-
 #pragma HLS INLINE off
+
+	int M_MIN;
+	M_MIN_s_in >> M_MIN;
+	M_MIN_s_out << M_MIN;
+
 	for(int i = 0; i < M_MIN; i++){
 DO_PRAGMA(HLS LOOP_TRIPCOUNT min=1 max=TILE_M)
 #pragma HLS PIPELINE II=1
@@ -547,7 +553,7 @@ DO_PRAGMA(HLS LOOP_TRIPCOUNT min=1 max=SA_R)
 		{
 DO_PRAGMA(HLS LOOP_TRIPCOUNT min=1 max=TILE_M)
 #pragma HLS PIPELINE II=1
-//#pragma HLS DEPENDENCE variable=partial_sum inter false
+#pragma HLS DEPENDENCE variable=partial_sum inter false
 			for(int j=0; j<SA_C; j++)
 			{
 				int tmp, psum;
@@ -574,9 +580,11 @@ DO_PRAGMA(HLS LOOP_TRIPCOUNT min=1 max=SA_C)
 	}
 }
 
-void Compute_SA(hls::stream<int> Ain_s[SA_R], hls::stream<int> Bin_s[SA_C], hls::stream<int> Cout_s[SA_C], int M_MIN,
+void Compute_SA(hls::stream<int> Ain_s[SA_R], hls::stream<int> Bin_s[SA_C], hls::stream<int> Cout_s[SA_C], hls::stream<int> M_MIN_s[SA_R],
 		hls::stream<wb_wrap_s> &wb0_s, hls::stream<wb_wrap_s> &wb1_s)
 {
+#pragma HLS DATAFLOW
+
 	hls::stream<int> A_inter[SA_R][SA_C+1];
 #pragma HLS STREAM variable=A_inter dim=1 depth=DEPTH_TILE_M
 #pragma HLS STREAM variable=A_inter dim=2 depth=DEPTH_TILE_M
@@ -586,6 +594,10 @@ void Compute_SA(hls::stream<int> Ain_s[SA_R], hls::stream<int> Bin_s[SA_C], hls:
 	hls::stream<int> C_out[SA_R+1][SA_C];
 //#pragma HLS STREAM variable=C_out dim=1 depth=DEPTH_COUT_S
 //#pragma HLS STREAM variable=C_out dim=2 depth=DEPTH_COUT_S
+
+	hls::stream<int> M_MIN_inter[SA_R][SA_C+1];
+#pragma HLS STREAM variable=M_MIN_inter dim=1
+#pragma HLS STREAM variable=M_MIN_inter dim=2
 
 	static PE_cls PE_array[SA_R][SA_C];
 #pragma HLS ARRAY_PARTITION variable=PE_array complete dim=1
@@ -664,76 +676,89 @@ void Compute_SA(hls::stream<int> Ain_s[SA_R], hls::stream<int> Bin_s[SA_C], hls:
 	}
 
 	Compute_SA_Loop:{
-		PE_array[0][0].compute<0,0>(     Ain_s[0], C_out[0][0], A_inter[0][0+1], C_out[0+1][0], M_MIN);
-		PE_array[0][1].compute<0,1>(A_inter[0][1], C_out[0][1], A_inter[0][1+1], C_out[0+1][1], M_MIN);
-		PE_array[0][2].compute<0,2>(A_inter[0][2], C_out[0][2], A_inter[0][2+1], C_out[0+1][2], M_MIN);
-		PE_array[0][3].compute<0,3>(A_inter[0][3], C_out[0][3], A_inter[0][3+1], C_out[0+1][3], M_MIN);
-		PE_array[0][4].compute<0,4>(A_inter[0][4], C_out[0][4], A_inter[0][4+1], C_out[0+1][4], M_MIN);
-		PE_array[0][5].compute<0,5>(A_inter[0][5], C_out[0][5], A_inter[0][5+1], C_out[0+1][5], M_MIN);
-		PE_array[0][6].compute<0,6>(A_inter[0][6], C_out[0][6], A_inter[0][6+1], C_out[0+1][6], M_MIN);
-		PE_array[0][7].compute<0,7>(A_inter[0][7], C_out[0][7], A_inter[0][7+1], C_out[0+1][7], M_MIN);
-		PE_array[0][8].compute<0,8>(A_inter[0][8], C_out[0][8], A_inter[0][8+1], C_out[0+1][8], M_MIN);
+		PE_array[0][0].compute<0,0>(     Ain_s[0],        M_MIN_s[0], C_out[0][0], A_inter[0][0+1], M_MIN_inter[0][0+1], C_out[0+1][0]);
+		PE_array[0][1].compute<0,1>(A_inter[0][1], M_MIN_inter[0][1], C_out[0][1], A_inter[0][1+1], M_MIN_inter[0][1+1], C_out[0+1][1]);
+		PE_array[0][2].compute<0,2>(A_inter[0][2], M_MIN_inter[0][2], C_out[0][2], A_inter[0][2+1], M_MIN_inter[0][2+1], C_out[0+1][2]);
+		PE_array[0][3].compute<0,3>(A_inter[0][3], M_MIN_inter[0][3], C_out[0][3], A_inter[0][3+1], M_MIN_inter[0][3+1], C_out[0+1][3]);
+		PE_array[0][4].compute<0,4>(A_inter[0][4], M_MIN_inter[0][4], C_out[0][4], A_inter[0][4+1], M_MIN_inter[0][4+1], C_out[0+1][4]);
+		PE_array[0][5].compute<0,5>(A_inter[0][5], M_MIN_inter[0][5], C_out[0][5], A_inter[0][5+1], M_MIN_inter[0][5+1], C_out[0+1][5]);
+		PE_array[0][6].compute<0,6>(A_inter[0][6], M_MIN_inter[0][6], C_out[0][6], A_inter[0][6+1], M_MIN_inter[0][6+1], C_out[0+1][6]);
+		PE_array[0][7].compute<0,7>(A_inter[0][7], M_MIN_inter[0][7], C_out[0][7], A_inter[0][7+1], M_MIN_inter[0][7+1], C_out[0+1][7]);
+		PE_array[0][8].compute<0,8>(A_inter[0][8], M_MIN_inter[0][8], C_out[0][8], A_inter[0][8+1], M_MIN_inter[0][8+1], C_out[0+1][8]);
 
-		PE_array[1][0].compute<1,0>(     Ain_s[1], C_out[1][0], A_inter[1][0+1], C_out[1+1][0], M_MIN);
-		PE_array[1][1].compute<1,1>(A_inter[1][1], C_out[1][1], A_inter[1][1+1], C_out[1+1][1], M_MIN);
-		PE_array[1][2].compute<1,2>(A_inter[1][2], C_out[1][2], A_inter[1][2+1], C_out[1+1][2], M_MIN);
-		PE_array[1][3].compute<1,3>(A_inter[1][3], C_out[1][3], A_inter[1][3+1], C_out[1+1][3], M_MIN);
-		PE_array[1][4].compute<1,4>(A_inter[1][4], C_out[1][4], A_inter[1][4+1], C_out[1+1][4], M_MIN);
-		PE_array[1][5].compute<1,5>(A_inter[1][5], C_out[1][5], A_inter[1][5+1], C_out[1+1][5], M_MIN);
-		PE_array[1][6].compute<1,6>(A_inter[1][6], C_out[1][6], A_inter[1][6+1], C_out[1+1][6], M_MIN);
-		PE_array[1][7].compute<1,7>(A_inter[1][7], C_out[1][7], A_inter[1][7+1], C_out[1+1][7], M_MIN);
-		PE_array[1][8].compute<1,8>(A_inter[1][8], C_out[1][8], A_inter[1][8+1], C_out[1+1][8], M_MIN);
+		PE_array[1][0].compute<1,0>(     Ain_s[1],        M_MIN_s[1], C_out[1][0], A_inter[1][0+1], M_MIN_inter[1][0+1], C_out[1+1][0]);
+		PE_array[1][1].compute<1,1>(A_inter[1][1], M_MIN_inter[1][1], C_out[1][1], A_inter[1][1+1], M_MIN_inter[1][1+1], C_out[1+1][1]);
+		PE_array[1][2].compute<1,2>(A_inter[1][2], M_MIN_inter[1][2], C_out[1][2], A_inter[1][2+1], M_MIN_inter[1][2+1], C_out[1+1][2]);
+		PE_array[1][3].compute<1,3>(A_inter[1][3], M_MIN_inter[1][3], C_out[1][3], A_inter[1][3+1], M_MIN_inter[1][3+1], C_out[1+1][3]);
+		PE_array[1][4].compute<1,4>(A_inter[1][4], M_MIN_inter[1][4], C_out[1][4], A_inter[1][4+1], M_MIN_inter[1][4+1], C_out[1+1][4]);
+		PE_array[1][5].compute<1,5>(A_inter[1][5], M_MIN_inter[1][5], C_out[1][5], A_inter[1][5+1], M_MIN_inter[1][5+1], C_out[1+1][5]);
+		PE_array[1][6].compute<1,6>(A_inter[1][6], M_MIN_inter[1][6], C_out[1][6], A_inter[1][6+1], M_MIN_inter[1][6+1], C_out[1+1][6]);
+		PE_array[1][7].compute<1,7>(A_inter[1][7], M_MIN_inter[1][7], C_out[1][7], A_inter[1][7+1], M_MIN_inter[1][7+1], C_out[1+1][7]);
+		PE_array[1][8].compute<1,8>(A_inter[1][8], M_MIN_inter[1][8], C_out[1][8], A_inter[1][8+1], M_MIN_inter[1][8+1], C_out[1+1][8]);
 
-		PE_array[2][0].compute<2,0>(     Ain_s[2], C_out[2][0], A_inter[2][0+1], C_out[2+1][0], M_MIN);
-		PE_array[2][1].compute<2,1>(A_inter[2][1], C_out[2][1], A_inter[2][1+1], C_out[2+1][1], M_MIN);
-		PE_array[2][2].compute<2,2>(A_inter[2][2], C_out[2][2], A_inter[2][2+1], C_out[2+1][2], M_MIN);
-		PE_array[2][3].compute<2,3>(A_inter[2][3], C_out[2][3], A_inter[2][3+1], C_out[2+1][3], M_MIN);
-		PE_array[2][4].compute<2,4>(A_inter[2][4], C_out[2][4], A_inter[2][4+1], C_out[2+1][4], M_MIN);
-		PE_array[2][5].compute<2,5>(A_inter[2][5], C_out[2][5], A_inter[2][5+1], C_out[2+1][5], M_MIN);
-		PE_array[2][6].compute<2,6>(A_inter[2][6], C_out[2][6], A_inter[2][6+1], C_out[2+1][6], M_MIN);
-		PE_array[2][7].compute<2,7>(A_inter[2][7], C_out[2][7], A_inter[2][7+1], C_out[2+1][7], M_MIN);
-		PE_array[2][8].compute<2,8>(A_inter[2][8], C_out[2][8], A_inter[2][8+1], C_out[2+1][8], M_MIN);
+		PE_array[2][0].compute<2,0>(     Ain_s[2],        M_MIN_s[2], C_out[2][0], A_inter[2][0+1], M_MIN_inter[2][0+1], C_out[2+1][0]);
+		PE_array[2][1].compute<2,1>(A_inter[2][1], M_MIN_inter[2][1], C_out[2][1], A_inter[2][1+1], M_MIN_inter[2][1+1], C_out[2+1][1]);
+		PE_array[2][2].compute<2,2>(A_inter[2][2], M_MIN_inter[2][2], C_out[2][2], A_inter[2][2+1], M_MIN_inter[2][2+1], C_out[2+1][2]);
+		PE_array[2][3].compute<2,3>(A_inter[2][3], M_MIN_inter[2][3], C_out[2][3], A_inter[2][3+1], M_MIN_inter[2][3+1], C_out[2+1][3]);
+		PE_array[2][4].compute<2,4>(A_inter[2][4], M_MIN_inter[2][4], C_out[2][4], A_inter[2][4+1], M_MIN_inter[2][4+1], C_out[2+1][4]);
+		PE_array[2][5].compute<2,5>(A_inter[2][5], M_MIN_inter[2][5], C_out[2][5], A_inter[2][5+1], M_MIN_inter[2][5+1], C_out[2+1][5]);
+		PE_array[2][6].compute<2,6>(A_inter[2][6], M_MIN_inter[2][6], C_out[2][6], A_inter[2][6+1], M_MIN_inter[2][6+1], C_out[2+1][6]);
+		PE_array[2][7].compute<2,7>(A_inter[2][7], M_MIN_inter[2][7], C_out[2][7], A_inter[2][7+1], M_MIN_inter[2][7+1], C_out[2+1][7]);
+		PE_array[2][8].compute<2,8>(A_inter[2][8], M_MIN_inter[2][8], C_out[2][8], A_inter[2][8+1], M_MIN_inter[2][8+1], C_out[2+1][8]);
 
-		PE_array[3][0].compute<3,0>(     Ain_s[3], C_out[3][0], A_inter[3][0+1], C_out[3+1][0], M_MIN);
-		PE_array[3][1].compute<3,1>(A_inter[3][1], C_out[3][1], A_inter[3][1+1], C_out[3+1][1], M_MIN);
-		PE_array[3][2].compute<3,2>(A_inter[3][2], C_out[3][2], A_inter[3][2+1], C_out[3+1][2], M_MIN);
-		PE_array[3][3].compute<3,3>(A_inter[3][3], C_out[3][3], A_inter[3][3+1], C_out[3+1][3], M_MIN);
-		PE_array[3][4].compute<3,4>(A_inter[3][4], C_out[3][4], A_inter[3][4+1], C_out[3+1][4], M_MIN);
-		PE_array[3][5].compute<3,5>(A_inter[3][5], C_out[3][5], A_inter[3][5+1], C_out[3+1][5], M_MIN);
-		PE_array[3][6].compute<3,6>(A_inter[3][6], C_out[3][6], A_inter[3][6+1], C_out[3+1][6], M_MIN);
-		PE_array[3][7].compute<3,7>(A_inter[3][7], C_out[3][7], A_inter[3][7+1], C_out[3+1][7], M_MIN);
-		PE_array[3][8].compute<3,8>(A_inter[3][8], C_out[3][8], A_inter[3][8+1], C_out[3+1][8], M_MIN);
+		PE_array[3][0].compute<3,0>(     Ain_s[3],        M_MIN_s[3], C_out[3][0], A_inter[3][0+1], M_MIN_inter[3][0+1], C_out[3+1][0]);
+		PE_array[3][1].compute<3,1>(A_inter[3][1], M_MIN_inter[3][1], C_out[3][1], A_inter[3][1+1], M_MIN_inter[3][1+1], C_out[3+1][1]);
+		PE_array[3][2].compute<3,2>(A_inter[3][2], M_MIN_inter[3][2], C_out[3][2], A_inter[3][2+1], M_MIN_inter[3][2+1], C_out[3+1][2]);
+		PE_array[3][3].compute<3,3>(A_inter[3][3], M_MIN_inter[3][3], C_out[3][3], A_inter[3][3+1], M_MIN_inter[3][3+1], C_out[3+1][3]);
+		PE_array[3][4].compute<3,4>(A_inter[3][4], M_MIN_inter[3][4], C_out[3][4], A_inter[3][4+1], M_MIN_inter[3][4+1], C_out[3+1][4]);
+		PE_array[3][5].compute<3,5>(A_inter[3][5], M_MIN_inter[3][5], C_out[3][5], A_inter[3][5+1], M_MIN_inter[3][5+1], C_out[3+1][5]);
+		PE_array[3][6].compute<3,6>(A_inter[3][6], M_MIN_inter[3][6], C_out[3][6], A_inter[3][6+1], M_MIN_inter[3][6+1], C_out[3+1][6]);
+		PE_array[3][7].compute<3,7>(A_inter[3][7], M_MIN_inter[3][7], C_out[3][7], A_inter[3][7+1], M_MIN_inter[3][7+1], C_out[3+1][7]);
+		PE_array[3][8].compute<3,8>(A_inter[3][8], M_MIN_inter[3][8], C_out[3][8], A_inter[3][8+1], M_MIN_inter[3][8+1], C_out[3+1][8]);
 
-		PE_array[4][0].compute<4,0>(     Ain_s[4], C_out[4][0], A_inter[4][0+1], C_out[4+1][0], M_MIN);
-		PE_array[4][1].compute<4,1>(A_inter[4][1], C_out[4][1], A_inter[4][1+1], C_out[4+1][1], M_MIN);
-		PE_array[4][2].compute<4,2>(A_inter[4][2], C_out[4][2], A_inter[4][2+1], C_out[4+1][2], M_MIN);
-		PE_array[4][3].compute<4,3>(A_inter[4][3], C_out[4][3], A_inter[4][3+1], C_out[4+1][3], M_MIN);
-		PE_array[4][4].compute<4,4>(A_inter[4][4], C_out[4][4], A_inter[4][4+1], C_out[4+1][4], M_MIN);
-		PE_array[4][5].compute<4,5>(A_inter[4][5], C_out[4][5], A_inter[4][5+1], C_out[4+1][5], M_MIN);
-		PE_array[4][6].compute<4,6>(A_inter[4][6], C_out[4][6], A_inter[4][6+1], C_out[4+1][6], M_MIN);
-		PE_array[4][7].compute<4,7>(A_inter[4][7], C_out[4][7], A_inter[4][7+1], C_out[4+1][7], M_MIN);
-		PE_array[4][8].compute<4,8>(A_inter[4][8], C_out[4][8], A_inter[4][8+1], C_out[4+1][8], M_MIN);
+		PE_array[4][0].compute<4,0>(     Ain_s[4],        M_MIN_s[4], C_out[4][0], A_inter[4][0+1], M_MIN_inter[4][0+1], C_out[4+1][0]);
+		PE_array[4][1].compute<4,1>(A_inter[4][1], M_MIN_inter[4][1], C_out[4][1], A_inter[4][1+1], M_MIN_inter[4][1+1], C_out[4+1][1]);
+		PE_array[4][2].compute<4,2>(A_inter[4][2], M_MIN_inter[4][2], C_out[4][2], A_inter[4][2+1], M_MIN_inter[4][2+1], C_out[4+1][2]);
+		PE_array[4][3].compute<4,3>(A_inter[4][3], M_MIN_inter[4][3], C_out[4][3], A_inter[4][3+1], M_MIN_inter[4][3+1], C_out[4+1][3]);
+		PE_array[4][4].compute<4,4>(A_inter[4][4], M_MIN_inter[4][4], C_out[4][4], A_inter[4][4+1], M_MIN_inter[4][4+1], C_out[4+1][4]);
+		PE_array[4][5].compute<4,5>(A_inter[4][5], M_MIN_inter[4][5], C_out[4][5], A_inter[4][5+1], M_MIN_inter[4][5+1], C_out[4+1][5]);
+		PE_array[4][6].compute<4,6>(A_inter[4][6], M_MIN_inter[4][6], C_out[4][6], A_inter[4][6+1], M_MIN_inter[4][6+1], C_out[4+1][6]);
+		PE_array[4][7].compute<4,7>(A_inter[4][7], M_MIN_inter[4][7], C_out[4][7], A_inter[4][7+1], M_MIN_inter[4][7+1], C_out[4+1][7]);
+		PE_array[4][8].compute<4,8>(A_inter[4][8], M_MIN_inter[4][8], C_out[4][8], A_inter[4][8+1], M_MIN_inter[4][8+1], C_out[4+1][8]);
 
-		PE_array[5][0].compute<5,0>(     Ain_s[5], C_out[5][0], A_inter[5][0+1], C_out[5+1][0], M_MIN);
-		PE_array[5][1].compute<5,1>(A_inter[5][1], C_out[5][1], A_inter[5][1+1], C_out[5+1][1], M_MIN);
-		PE_array[5][2].compute<5,2>(A_inter[5][2], C_out[5][2], A_inter[5][2+1], C_out[5+1][2], M_MIN);
-		PE_array[5][3].compute<5,3>(A_inter[5][3], C_out[5][3], A_inter[5][3+1], C_out[5+1][3], M_MIN);
-		PE_array[5][4].compute<5,4>(A_inter[5][4], C_out[5][4], A_inter[5][4+1], C_out[5+1][4], M_MIN);
-		PE_array[5][5].compute<5,5>(A_inter[5][5], C_out[5][5], A_inter[5][5+1], C_out[5+1][5], M_MIN);
-		PE_array[5][6].compute<5,6>(A_inter[5][6], C_out[5][6], A_inter[5][6+1], C_out[5+1][6], M_MIN);
-		PE_array[5][7].compute<5,7>(A_inter[5][7], C_out[5][7], A_inter[5][7+1], C_out[5+1][7], M_MIN);
-		PE_array[5][8].compute<5,8>(A_inter[5][8], C_out[5][8], A_inter[5][8+1], C_out[5+1][8], M_MIN);
+		PE_array[5][0].compute<5,0>(     Ain_s[5],        M_MIN_s[5], C_out[5][0], A_inter[5][0+1], M_MIN_inter[5][0+1], C_out[5+1][0]);
+		PE_array[5][1].compute<5,1>(A_inter[5][1], M_MIN_inter[5][1], C_out[5][1], A_inter[5][1+1], M_MIN_inter[5][1+1], C_out[5+1][1]);
+		PE_array[5][2].compute<5,2>(A_inter[5][2], M_MIN_inter[5][2], C_out[5][2], A_inter[5][2+1], M_MIN_inter[5][2+1], C_out[5+1][2]);
+		PE_array[5][3].compute<5,3>(A_inter[5][3], M_MIN_inter[5][3], C_out[5][3], A_inter[5][3+1], M_MIN_inter[5][3+1], C_out[5+1][3]);
+		PE_array[5][4].compute<5,4>(A_inter[5][4], M_MIN_inter[5][4], C_out[5][4], A_inter[5][4+1], M_MIN_inter[5][4+1], C_out[5+1][4]);
+		PE_array[5][5].compute<5,5>(A_inter[5][5], M_MIN_inter[5][5], C_out[5][5], A_inter[5][5+1], M_MIN_inter[5][5+1], C_out[5+1][5]);
+		PE_array[5][6].compute<5,6>(A_inter[5][6], M_MIN_inter[5][6], C_out[5][6], A_inter[5][6+1], M_MIN_inter[5][6+1], C_out[5+1][6]);
+		PE_array[5][7].compute<5,7>(A_inter[5][7], M_MIN_inter[5][7], C_out[5][7], A_inter[5][7+1], M_MIN_inter[5][7+1], C_out[5+1][7]);
+		PE_array[5][8].compute<5,8>(A_inter[5][8], M_MIN_inter[5][8], C_out[5][8], A_inter[5][8+1], M_MIN_inter[5][8+1], C_out[5+1][8]);
 
-		PE_array[6][0].compute<6,0>(     Ain_s[6], C_out[6][0], A_inter[6][0+1], Cout_s[0], M_MIN);
-		PE_array[6][1].compute<6,1>(A_inter[6][1], C_out[6][1], A_inter[6][1+1], Cout_s[1], M_MIN);
-		PE_array[6][2].compute<6,2>(A_inter[6][2], C_out[6][2], A_inter[6][2+1], Cout_s[2], M_MIN);
-		PE_array[6][3].compute<6,3>(A_inter[6][3], C_out[6][3], A_inter[6][3+1], Cout_s[3], M_MIN);
-		PE_array[6][4].compute<6,4>(A_inter[6][4], C_out[6][4], A_inter[6][4+1], Cout_s[4], M_MIN);
-		PE_array[6][5].compute<6,5>(A_inter[6][5], C_out[6][5], A_inter[6][5+1], Cout_s[5], M_MIN);
-		PE_array[6][6].compute<6,6>(A_inter[6][6], C_out[6][6], A_inter[6][6+1], Cout_s[6], M_MIN);
-		PE_array[6][7].compute<6,7>(A_inter[6][7], C_out[6][7], A_inter[6][7+1], Cout_s[7], M_MIN);
-		PE_array[6][8].compute<6,8>(A_inter[6][8], C_out[6][8], A_inter[6][8+1], Cout_s[8], M_MIN);
+		PE_array[6][0].compute<6,0>(     Ain_s[6],        M_MIN_s[6], C_out[6][0], A_inter[6][0+1], M_MIN_inter[6][0+1], Cout_s[0]);
+		PE_array[6][1].compute<6,1>(A_inter[6][1], M_MIN_inter[6][1], C_out[6][1], A_inter[6][1+1], M_MIN_inter[6][1+1], Cout_s[1]);
+		PE_array[6][2].compute<6,2>(A_inter[6][2], M_MIN_inter[6][2], C_out[6][2], A_inter[6][2+1], M_MIN_inter[6][2+1], Cout_s[2]);
+		PE_array[6][3].compute<6,3>(A_inter[6][3], M_MIN_inter[6][3], C_out[6][3], A_inter[6][3+1], M_MIN_inter[6][3+1], Cout_s[3]);
+		PE_array[6][4].compute<6,4>(A_inter[6][4], M_MIN_inter[6][4], C_out[6][4], A_inter[6][4+1], M_MIN_inter[6][4+1], Cout_s[4]);
+		PE_array[6][5].compute<6,5>(A_inter[6][5], M_MIN_inter[6][5], C_out[6][5], A_inter[6][5+1], M_MIN_inter[6][5+1], Cout_s[5]);
+		PE_array[6][6].compute<6,6>(A_inter[6][6], M_MIN_inter[6][6], C_out[6][6], A_inter[6][6+1], M_MIN_inter[6][6+1], Cout_s[6]);
+		PE_array[6][7].compute<6,7>(A_inter[6][7], M_MIN_inter[6][7], C_out[6][7], A_inter[6][7+1], M_MIN_inter[6][7+1], Cout_s[7]);
+		PE_array[6][8].compute<6,8>(A_inter[6][8], M_MIN_inter[6][8], C_out[6][8], A_inter[6][8+1], M_MIN_inter[6][8+1], Cout_s[8]);
 	}
+
+	DRAIN_MIN_M:{
+		for(int i=1; i<SA_R; i++)
+		{
+#pragma HLS UNROLL
+			int tmp;
+			M_MIN_inter[i][SA_C] >> tmp;
+//			Drain(M_MIN_inter[i][SA_C], M_MIN);
+		}
+	}
+
+	int M_MIN;
+	M_MIN_inter[0][SA_C] >> M_MIN;
 
 	DRAIN_A:for(int i=0; i<SA_R; i++)
 	{
@@ -795,8 +820,19 @@ DO_PRAGMA(HLS LOOP_TRIPCOUNT min=1 max=SA_C)
 			}
 }
 
+void Trans_M_MIN(hls::stream<int> M_MIN_s[SA_R], int M_MIN){
+
+#pragma HLS INLINE off
+
+	for(int i = 0;i<SA_R;i++){
+#pragma HLS UNROLL
+		M_MIN_s[i] << M_MIN;
+	}
+
+}
+
 void Load_AB_wrapper(hls::stream<int> Ain_s[SA_R], hls::stream<int> Bin_s[SA_C], int *A, int *B, int i, int j, bool k_init,
-		int K, int N, int M_MIN, int N_MIN, hls::stream<wb_wrap_s> &wb0_s){
+		int K, int N, int M_MIN, int N_MIN, hls::stream<wb_wrap_s> &wb0_s, hls::stream<int> M_MIN_s[SA_R]){
 
 	static int k;
 	if(k_init){
@@ -809,6 +845,7 @@ void Load_AB_wrapper(hls::stream<int> Ain_s[SA_R], hls::stream<int> Bin_s[SA_C],
 
 	Load_A(Ain_s, A, i, k, K, M_MIN, K_MIN);
 	Load_B(Bin_s, B, k, j, N, K_MIN, N_MIN);
+	Trans_M_MIN(M_MIN_s, M_MIN);
 
 	wb_wrap_s wbw_s0;
 	wbw_s0.wb = ((k+K_MIN) == K);
@@ -829,13 +866,15 @@ void DATAFLOW_SA_LCW(int C_local[TILE_M][SA_C], int *A, int *B, int M, int N, in
 	hls::stream<wb_wrap_s> wb0_s;
 	hls::stream<wb_wrap_s> wb1_s;
 
+	hls::stream<int> M_MIN_s[SA_R];
+
 	Loop_K:for(int k=0; k<kloops; k++)
 	{
 DO_PRAGMA(HLS LOOP_TRIPCOUNT min=1 max=NUM_K)
 #pragma HLS DATAFLOW
-		Load_AB_wrapper( Ain_s, Bin_s, A, B, i, j, k==0, K, N, M_MIN, N_MIN, wb0_s);
+		Load_AB_wrapper( Ain_s, Bin_s, A, B, i, j, k==0, K, N, M_MIN, N_MIN, wb0_s, M_MIN_s);
 
-		Compute_SA(Ain_s, Bin_s, Cout_s, M_MIN, wb0_s, wb1_s);
+		Compute_SA(Ain_s, Bin_s, Cout_s, M_MIN_s, wb0_s, wb1_s);
 
 		Writeback_SA_Cout( C_local, Cout_s, M_MIN, N_MIN, wb1_s);
 	}
@@ -875,7 +914,7 @@ DO_PRAGMA(HLS LOOP_TRIPCOUNT min=1 max=NUM_N)
 		}
 	}
 }
-//////////////////////////////////////////v12-iws_c syn ok end////////////////////////////////////////
+//////////////////////////////////////////v13-iws_c syn ok end////////////////////////////////////////
 
 ////////////////////////////////////////////v12-iws_c syn ok  start////////////////////////////////////////
 //typedef struct {
